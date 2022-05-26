@@ -1,0 +1,78 @@
+version: 0.2
+
+env:
+  shell: bash
+  variables:
+    # For Docker
+    DOCKER_BUILDKIT: 1
+    COMPOSE_DOCKER_CLI_BUILD: 1
+  secrets-manager:
+    # RNAPP secrets
+    RNAPP_CONFIG: rnapp-staging
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 14
+    commands:
+      # Set APT_VERSION
+      - export APT_VERSION=`cat VERSION`
+      - IFS="." read -r V_MAJOR V_MINOR V_PATCH <<< $APT_VERSION
+      # start
+      - echo Installing dependencies...
+      # install the RNAPP dependencies
+      - rm -f ./src/config/env.js
+      - echo "module.exports = {" >> ./src/config/env.js
+      - >
+        echo "  env: $RNAPP_CONFIG," >> ./src/config/env.js
+      - echo "};" >> ./src/config/env.js
+      - yarn install
+      # install rn cli for building bundles
+      - npm i -g react-native-cli
+  build:
+    commands:
+      # build the RNAPP
+      - yarn run web:production
+      # build the rn-app BUNDLES
+      - npm i
+      - mkdir ~/bundle-output
+      - react-native bundle --entry-file ./index.ios.js --dev false --platform ios --bundle-output ~/bundle-output/main.ios.jsbundle
+      - react-native bundle --entry-file ./index.android.js --dev false --platform android --bundle-output ~/bundle-output/index.android.bundle
+  post_build:
+    commands:
+      # deploy RNAPP
+      - echo RNAPP >> Updating environment...
+      - cd ./dist/web
+      - echo $V_PATCH > VERSION
+      - aws s3 sync . s3://aptr-app-rnapp-dev
+      - aws s3 cp VERSION s3://aptr-app-pwa-dev/$V_MAJOR.$V_MINOR/VERSION
+      - aws s3 sync . s3://aptr-app-pwa-dev/$V_MAJOR.$V_MINOR/$V_PATCH/ --delete
+      - aws cloudfront create-invalidation --distribution-id E2R4J05WO367SS --paths '/*'
+      # deploy app bundles & VERSION file
+      - cd ~/bundle-output
+      - aws s3 sync . s3://aptr-app-rnapp-native-dev/$V_MAJOR.$V_MINOR/$V_PATCH --delete
+      - cd ~
+      - echo $V_PATCH > VERSION
+      - aws s3 cp VERSION s3://aptr-app-rnapp-native-dev/$V_MAJOR.$V_MINOR/VERSION
+      - aws cloudfront create-invalidation --distribution-id E73HVTBYMQZAD --paths "/$V_MAJOR.$V_MINOR/*"
+artifacts:
+  files:
+    - 'build/*'
+  base-directory: $CODEBUILD_SRC_DIR_cms_staging
+  discard-paths: yes
+  secondary-artifacts:
+    cms_staging:
+      base-directory: $CODEBUILD_SRC_DIR_cms_staging
+      files:
+        - cms-staging
+      name: cms-staging
+    rnapp_staging:
+      base-directory: $CODEBUILD_SRC_DIR_rnapp_staging
+      files:
+        - rnapp-staging
+      name: rnapp-staging 
+    github_deployment_key_bundle:
+      base-directory: $CODEBUILD_SRC_DIR_github_deployment_key_bundle
+      files:
+        - github-deployment-key-bundle
+      name: github-deployment-key-bundle
