@@ -1,0 +1,70 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Library Auto-Bump
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the main branch
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '.version'
+      - 'VERSION'
+      - '.github/**'
+      - '.aws/**'
+      - '.scripts/**'
+      - 'package.json'
+      - 'dist/web-lib/**'
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  check-merge:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+
+      - uses: actions/setup-node@v2
+        with:
+          node-version: 'lts/fermium'
+      - run: npm install
+
+      - run: cp src/config/env.example.js src/config/env.js
+
+  auto-bump:
+    runs-on: ubuntu-latest
+    needs: [ check-merge ]
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          token: ${{ secrets.APT_DEPLOYMENT_ACCESS_TOKEN }}
+      - uses: actions/setup-node@v2
+        with:
+          node-version: 'lts/fermium'
+      - run: npm install
+
+      - run: cp src/config/env.example.js src/config/env.js
+
+      - name: Auto-Bump & Tag
+        run: bash .scripts/build_tag.sh
+  trigger-deploy:
+    runs-on: ubuntu-latest
+    needs: [ check-merge, auto-bump ]
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1
+      - name: Run CodeBuild
+        uses: aws-actions/aws-codebuild-run-build@v1
+        with:
+          project-name: rnapp-dev
+          buildspec-override: .aws/buildspecs/buildspec_dev.yml
