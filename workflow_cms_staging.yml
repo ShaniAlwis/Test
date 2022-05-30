@@ -1,6 +1,6 @@
 # This is a basic workflow to help you get started with Actions
 
-name: PR based deploy
+name: staging PR based deploy
 
 # Controls when the workflow will run
 on:
@@ -69,5 +69,5 @@ jobs:
       - name: Run CodeBuild
         uses: aws-actions/aws-codebuild-run-build@v1
         with:
-          project-name: cms-dev
-          buildspec-override: .aws/buildspecs/buildspec_dev.yml
+          project-name: cms-staging
+          buildspec-override: .aws/buildspecs/buildspec_staging.yml
