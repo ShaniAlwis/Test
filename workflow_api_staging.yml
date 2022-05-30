@@ -1,4 +1,4 @@
-name: Dev Auto-Deploy
+name: Staging PR based deploy
 
 on:
   push:
@@ -72,5 +72,5 @@ jobs:
     - name: Run CodeBuild
       uses: aws-actions/aws-codebuild-run-build@v1
       with:
-        project-name: api-dev
+        project-name: api-staging
         buildspec-override: .aws/buildspecs/buildspec_api_.yml
