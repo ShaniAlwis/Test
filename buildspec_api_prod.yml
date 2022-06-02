@@ -1,0 +1,80 @@
+version: 0.2
+
+env:
+  variables:
+    # For Docker
+    DOCKER_BUILDKIT: 1
+    COMPOSE_DOCKER_CLI_BUILD: 1
+  secrets-manager:
+    # API secrets
+    APT_API_CONFIG: api-staging
+
+phases:
+  install:
+    commands:
+      # Log in to AWS registry
+      - aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 006592501465.dkr.ecr.eu-north-1.amazonaws.com
+  pre_build:
+    commands:
+      # Set APT_VERSION
+      - APT_VERSION=`cat .version`
+      # API
+      - aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 006592501465.dkr.ecr.eu-north-1.amazonaws.com
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api:dev || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-apps:dev || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-push:dev || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-analytics:dev || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-build:dev || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-pwa:dev || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-cms-apps:dev || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-webhook:dev || true
+  build:
+    commands:
+      - echo Building...
+      # build the API
+      - docker-compose build --parallel api apps push analytics build pwa cms-apps webhook
+      - docker tag api_api:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api:dev
+      - docker tag api_apps:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-apps:dev
+      - docker tag api_push:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-push:dev
+      - docker tag api_analytics:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-analytics:dev
+      - docker tag api_build:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-build:dev
+      - docker tag api_pwa:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-pwa:dev
+      - docker tag api_cms_apps:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-cms-apps:dev
+      - docker tag api_webhook:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-webhook:dev
+  post_build:
+    commands:
+      # deploy API
+      - echo API >> Updating environment...
+      - cd $CODEBUILD_SRC_DIR_api_dev
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api:dev
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-apps:dev
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-push:dev
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-analytics:dev
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-build:dev
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-pwa:dev
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-cms-apps:dev
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-webhook:dev
+      - aws ecs update-service --cluster api-dev --service api --force-new-deployment
+      - aws ecs update-service --cluster api-dev --service apps --force-new-deployment
+      - aws ecs update-service --cluster api-dev --service push --force-new-deployment
+      - aws ecs update-service --cluster api-dev --service analytics --force-new-deployment
+      - aws ecs update-service --cluster api-dev --service build --force-new-deployment
+      - aws ecs update-service --cluster api-dev --service pwa --force-new-deployment
+      - aws ecs update-service --cluster api-dev --service cms-apps --force-new-deployment
+      - aws ecs update-service --cluster api-dev --service webhook --force-new-deployment
+artifacts:
+  files:
+    - 'build/*'
+  base-directory: $CODEBUILD_SRC_DIR_cms_staging
+  discard-paths: yes
+  secondary-artifacts:
+    api_staging:
+      base-directory: $CODEBUILD_SRC_DIR_api_staging
+      files:
+        - api-staging
+      name: api-staging
+    github_deployment_key_bundle:
+      base-directory: $CODEBUILD_SRC_DIR_github_deployment_key_bundle
+      files:
+        - github-deployment-key-bundle
+      name: github-deployment-key-bundle
