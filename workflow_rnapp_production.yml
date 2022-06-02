@@ -62,5 +62,5 @@ jobs:
       - name: Run CodeBuild
         uses: aws-actions/aws-codebuild-run-build@v1
         with:
-          project-name: rnapp-dev
+          project-name: rnapp-prod
           buildspec-override: .aws/buildspecs/buildspec_dev.yml
