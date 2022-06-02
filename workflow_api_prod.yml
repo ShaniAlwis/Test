@@ -1,8 +1,10 @@
-name: Staging PR based deploy
+name: Release based-prod
 
 on:
-  pull_request:
-    types: [ labeled ]
+  release:
+    types: [published]
+    tags: 
+      - v.*-prod
     
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -13,7 +15,7 @@ concurrency:
 
 jobs:
   check-merge:
-    if: ${{ github.event.label.name == 'staging' }}
+     if:  ${{ startsWith(github.event.release.tag_name, v.*-prod) }}
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
@@ -72,5 +74,5 @@ jobs:
     - name: Run CodeBuild
       uses: aws-actions/aws-codebuild-run-build@v1
       with:
-        project-name: api-staging
-        buildspec-override: .aws/buildspecs/buildspec_staging.yml
+        project-name: api-prod
+        buildspec-override: .aws/buildspecs/buildspec_prod.yml
