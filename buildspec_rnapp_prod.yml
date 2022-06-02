@@ -8,69 +8,84 @@ env:
     COMPOSE_DOCKER_CLI_BUILD: 1
   secrets-manager:
     # RNAPP secrets
-    RNAPP_CONFIG: rnapp-staging
+    RNAPP_CONFIG: rnapp-production
+    APT_VERSION: rnapp-production:VERSION
+    APT_APP_VERSION: rnapp-production:VERSION
 
 phases:
   install:
     runtime-versions:
       nodejs: 14
     commands:
-      # Set APT_VERSION
-      - export APT_VERSION=`cat VERSION`
+      - TAG=v$APT_VERSION
       - IFS="." read -r V_MAJOR V_MINOR V_PATCH <<< $APT_VERSION
-      # start
+      # set filewatcher limits
+      - sysctl -w fs.inotify.max_user_watches=524288
+      - sysctl -p
+      # setup yarn
+      - npm i -g yarn
       - echo Installing dependencies...
+      # put our deployment key in the proper folder
+      - cp $CODEBUILD_SRC_DIR_github_deployment_key_bundle/id_rsa ~/.ssh/id_rsa
+      # export it for use
+      - APT_SSH_KEY=`cat ~/.ssh/id_rsa`
+      - export APT_SSH_KEY
+      # Log in to AWS registry
+      - aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 006592501465.dkr.ecr.eu-north-1.amazonaws.com
       # install the RNAPP dependencies
+      - cd $CODEBUILD_SRC_DIR_rnapp_production
       - rm -f ./src/config/env.js
       - echo "module.exports = {" >> ./src/config/env.js
       - >
         echo "  env: $RNAPP_CONFIG," >> ./src/config/env.js
       - echo "};" >> ./src/config/env.js
-      - yarn install
-      # install rn cli for building bundles
+      - npm i
+      - cd src
+      - npm i
+      - cd web
+      - npm i
       - npm i -g react-native-cli
+  pre_build:
+    
   build:
     commands:
+      - echo Building...
       # build the RNAPP
-      - yarn run web:production
+      - cd $CODEBUILD_SRC_DIR_rnapp_production/src/web
+      - npm run build:production
       # build the rn-app BUNDLES
-      - npm i
+      - cd $CODEBUILD_SRC_DIR_rnapp_production/src
       - mkdir ~/bundle-output
-      - react-native bundle --entry-file ./index.ios.js --dev false --platform ios --bundle-output ~/bundle-output/main.ios.jsbundle
-      - react-native bundle --entry-file ./index.android.js --dev false --platform android --bundle-output ~/bundle-output/index.android.bundle
+      - npx react-native bundle --entry-file ./index.js --dev false --platform ios --bundle-output ~/bundle-output/main.ios.jsbundle
+      - npx react-native bundle --entry-file ./index.js --dev false --platform android --bundle-output ~/bundle-output/index.android.bundle
   post_build:
     commands:
       # deploy RNAPP
       - echo RNAPP >> Updating environment...
-      - cd ./dist/web
+      - cd $CODEBUILD_SRC_DIR_rnapp_production/dist/web
       - echo $V_PATCH > VERSION
-      - aws s3 sync . s3://aptr-app-rnapp-dev
-      - aws s3 cp VERSION s3://aptr-app-pwa-dev/$V_MAJOR.$V_MINOR/VERSION
-      - aws s3 sync . s3://aptr-app-pwa-dev/$V_MAJOR.$V_MINOR/$V_PATCH/ --delete
-      - aws cloudfront create-invalidation --distribution-id E2R4J05WO367SS --paths '/*'
+      - aws s3 sync . s3://aptr-app-rnapp-production
+      - aws s3 cp VERSION s3://aptr-app-pwa-production/$V_MAJOR.$V_MINOR/VERSION
+      - aws s3 sync . s3://aptr-app-pwa-production/$V_MAJOR.$V_MINOR/$V_PATCH/ --delete
+      - aws cloudfront create-invalidation --distribution-id E2MMTL2U38O8KW --paths '/*'
       # deploy app bundles & VERSION file
       - cd ~/bundle-output
-      - aws s3 sync . s3://aptr-app-rnapp-native-dev/$V_MAJOR.$V_MINOR/$V_PATCH --delete
+      - aws s3 sync . s3://aptr-app-rnapp-native-production/$V_MAJOR.$V_MINOR/$V_PATCH --delete
       - cd ~
       - echo $V_PATCH > VERSION
-      - aws s3 cp VERSION s3://aptr-app-rnapp-native-dev/$V_MAJOR.$V_MINOR/VERSION
-      - aws cloudfront create-invalidation --distribution-id E73HVTBYMQZAD --paths "/$V_MAJOR.$V_MINOR/*"
+      - aws s3 cp VERSION s3://aptr-app-rnapp-native-production/$V_MAJOR.$V_MINOR/VERSION
+      - aws cloudfront create-invalidation --distribution-id EEQ5BWGWNCIWZ --paths "/$V_MAJOR.$V_MINOR/*"
 artifacts:
   files:
     - 'build/*'
-  base-directory: $CODEBUILD_SRC_DIR_cms_staging
+  base-directory: $CODEBUILD_SRC_DIR_cms_production
   discard-paths: yes
   secondary-artifacts:
-    cms_staging:
-      base-directory: $CODEBUILD_SRC_DIR_cms_staging
+    rnapp_production:
+      base-directory: $CODEBUILD_SRC_DIR_rnapp_production
       files:
-        - cms-staging
-      name: cms-staging
-    rnapp_staging:
-      base-directory: $CODEBUILD_SRC_DIR_rnapp_staging
-      files:
-        - rnapp-staging
-      name: rnapp-staging 
+        - rnapp-production
+      name: rnapp-production
     github_deployment_key_bundle:
       base-directory: $CODEBUILD_SRC_DIR_github_deployment_key_bundle
       files:
