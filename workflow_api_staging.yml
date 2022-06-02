@@ -73,4 +73,4 @@ jobs:
       uses: aws-actions/aws-codebuild-run-build@v1
       with:
         project-name: api-staging
-        buildspec-override: .aws/buildspecs/buildspec_api_.yml
+        buildspec-override: .aws/buildspecs/buildspec_staging.yml
