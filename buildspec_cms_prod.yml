@@ -1,0 +1,112 @@
+version: 0.2
+
+env:
+  shell: bash
+  variables:
+    # For Docker
+    DOCKER_BUILDKIT: 1
+    COMPOSE_DOCKER_CLI_BUILD: 1
+  secrets-manager:
+    # CMS secrets
+    CMS_API_BASE_URL: cms-staging:API_BASE_URL
+    CMS_API_PUSH_BASE_URL: cms-staging:API_PUSH_BASE_URL
+    CMS_API_ANALYTICS_BASE_URL: cms-staging:API_ANALYTICS_BASE_URL
+    CMS_API_BUILD_BASE_URL: cms-staging:API_BUILD_BASE_URL
+    CMS_APP_BASE_URL: cms-staging:APP_BASE_URL
+    CMS_USE_MOCK_SERVICE: cms-staging:USE_MOCK_SERVICE
+    CMS_MAPBOX_API_TOKEN: cms-staging:MAPBOX_API_TOKEN
+    CMS_SUBDOMAIN_URL: cms-staging:SUBDOMAIN_URL
+    CMS_MEDIA_BUCKET_URL: cms-staging:MEDIA_BUCKET_URL
+    CMS_ICON_BUCKET_URL: cms-staging:ICON_BUCKET_URL
+    CMS_FILE_BUCKET_URL: cms-staging:FILE_BUCKET_URL
+    CMS_APP_ENV: cms-staging:APP_ENV
+    CMS_STRIPE_KEY: cms-staging:STRIPE_KEY
+    CMS_HOTJAR_ID: cms-staging:HOTJAR_ID
+    CMS_HOTJAR_V: cms-staging:HOTJAR_V
+    CMS_GTM_ID: cms-staging:GTM_ID
+    CMS_ACADEMY_BASE_URL: cms-staging:ACADEMY_BASE_URL
+    CMS_STUDIO_GET_HELP_URL: cms-staging:STUDIO_GET_HELP_URL
+    
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 14
+    commands:
+      # Set APT_VERSION
+      - export APT_VERSION=`cat .version`
+      - IFS="." read -r V_MAJOR V_MINOR V_PATCH <<< $APT_VERSION
+      # setup yarn
+      - npm i -g yarn
+      # install the CMS dependencies
+      - rm -f ./.env.staging
+      - >
+        echo "API_BASE_URL='$CMS_API_BASE_URL'"  >> ./.env.staging
+      - >
+        echo "API_PUSH_BASE_URL='$CMS_API_PUSH_BASE_URL'" >> ./.env.staging
+      - >
+        echo "API_ANALYTICS_BASE_URL='$CMS_API_ANALYTICS_BASE_URL'" >> ./.env.staging
+      - >
+        echo "API_BUILD_BASE_URL='$CMS_API_BUILD_BASE_URL'" >> ./.env.staging
+      - >
+        echo "APP_BASE_URL='$CMS_APP_BASE_URL'" >> ./.env.staging
+      - >
+        echo "USE_MOCK_SERVICE=$CMS_USE_MOCK_SERVICE" >> ./.env.staging
+      - >
+        echo "MAPBOX_API_TOKEN='$CMS_MAPBOX_API_TOKEN'" >> ./.env.staging
+      - >
+        echo "SUBDOMAIN_URL='$CMS_SUBDOMAIN_URL'" >> ./.env.staging
+      - >
+        echo "MEDIA_BUCKET_URL='$CMS_MEDIA_BUCKET_URL'" >> ./.env.staging
+      - >
+        echo "ICON_BUCKET_URL='$CMS_ICON_BUCKET_URL'" >> ./.env.staging
+      - >
+        echo "FILE_BUCKET_URL='$CMS_FILE_BUCKET_URL'" >> ./.env.staging
+      - >
+        echo "APP_ENV='$CMS_APP_ENV'" >> ./.env.staging
+      - >
+        echo "STRIPE_KEY='$CMS_STRIPE_KEY'" >> ./.env.staging
+      - >
+        echo "HOTJAR_ID='$CMS_HOTJAR_ID'" >> ./.env.staging
+      - >
+        echo "HOTJAR_V='$CMS_HOTJAR_V'" >> ./.env.staging
+      - >
+        echo "GTM_ID='$CMS_GTM_ID'" >> ./.env.staging
+      - >
+        echo "APT_VERSION='$APT_VERSION'" >> ./.env.staging
+      - >
+        echo "ACADEMY_BASE_URL='$CMS_ACADEMY_BASE_URL'" >> ./.env.staging
+      - >
+        echo "STUDIO_GET_HELP_URL='$CMS_STUDIO_GET_HELP_URL'" >> ./.env.staging
+      - yarn install
+  build:
+    commands:
+      # build the CMS
+      - yarn run build:staging
+  post_build:
+    commands:
+      # deploy CMS
+      - echo CMS >> Updating environment...
+      - cd ./build
+      - aws s3 sync . s3://aptr-app-cms-dev --delete # System CMS
+      - aws s3 sync . s3://aptr-app-cms-apps-dev # Apps CMS all files
+      - echo $V_PATCH > VERSION
+      - aws s3 cp VERSION s3://aptr-app-cms-apps-files-dev/$V_MAJOR.$V_MINOR/VERSION
+      - aws s3 sync . s3://aptr-app-cms-apps-files-dev/$V_MAJOR.$V_MINOR/$V_PATCH/ --delete # Apps CMS versioned files
+      - aws cloudfront create-invalidation --distribution-id E1AM81QEWWQE5F --paths '/*'
+artifacts:
+  files:
+    - 'build/*'
+  base-directory: $CODEBUILD_SRC_DIR_cms_staging
+  discard-paths: yes
+  secondary-artifacts:
+    cms_staging:
+      base-directory: $CODEBUILD_SRC_DIR_cms_staging
+      files:
+        - cms-staging
+      name: cms-staging
+    github_deployment_key_bundle:
+      base-directory: $CODEBUILD_SRC_DIR_github_deployment_key_bundle
+      files:
+        - github-deployment-key-bundle
+      name: github-deployment-key-bundle
