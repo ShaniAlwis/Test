@@ -8,37 +8,47 @@ env:
     COMPOSE_DOCKER_CLI_BUILD: 1
   secrets-manager:
     # CMS secrets
-    CMS_API_BASE_URL: cms-staging:API_BASE_URL
-    CMS_API_PUSH_BASE_URL: cms-staging:API_PUSH_BASE_URL
-    CMS_API_ANALYTICS_BASE_URL: cms-staging:API_ANALYTICS_BASE_URL
-    CMS_API_BUILD_BASE_URL: cms-staging:API_BUILD_BASE_URL
-    CMS_APP_BASE_URL: cms-staging:APP_BASE_URL
-    CMS_USE_MOCK_SERVICE: cms-staging:USE_MOCK_SERVICE
-    CMS_MAPBOX_API_TOKEN: cms-staging:MAPBOX_API_TOKEN
-    CMS_SUBDOMAIN_URL: cms-staging:SUBDOMAIN_URL
-    CMS_MEDIA_BUCKET_URL: cms-staging:MEDIA_BUCKET_URL
-    CMS_ICON_BUCKET_URL: cms-staging:ICON_BUCKET_URL
-    CMS_FILE_BUCKET_URL: cms-staging:FILE_BUCKET_URL
-    CMS_APP_ENV: cms-staging:APP_ENV
-    CMS_STRIPE_KEY: cms-staging:STRIPE_KEY
-    CMS_HOTJAR_ID: cms-staging:HOTJAR_ID
-    CMS_HOTJAR_V: cms-staging:HOTJAR_V
-    CMS_GTM_ID: cms-staging:GTM_ID
-    CMS_ACADEMY_BASE_URL: cms-staging:ACADEMY_BASE_URL
-    CMS_STUDIO_GET_HELP_URL: cms-staging:STUDIO_GET_HELP_URL
-    
+    CMS_API_BASE_URL: cms-production:API_BASE_URL
+    CMS_API_PUSH_BASE_URL: cms-production:API_PUSH_BASE_URL
+    CMS_API_ANALYTICS_BASE_URL: cms-production:API_ANALYTICS_BASE_URL
+    CMS_API_BUILD_BASE_URL: cms-production:API_BUILD_BASE_URL
+    CMS_APP_BASE_URL: cms-production:APP_BASE_URL
+    CMS_USE_MOCK_SERVICE: cms-production:USE_MOCK_SERVICE
+    CMS_MAPBOX_API_TOKEN: cms-production:MAPBOX_API_TOKEN
+    CMS_SUBDOMAIN_URL: cms-production:SUBDOMAIN_URL
+    CMS_MEDIA_BUCKET_URL: cms-production:MEDIA_BUCKET_URL
+    CMS_ICON_BUCKET_URL: cms-production:ICON_BUCKET_URL
+    CMS_FILE_BUCKET_URL: cms-production:FILE_BUCKET_URL
+    CMS_APP_ENV: cms-production:APP_ENV
+    CMS_STRIPE_KEY: cms-production:STRIPE_KEY
+    CMS_HOTJAR_ID: cms-production:HOTJAR_ID
+    CMS_HOTJAR_V: cms-production:HOTJAR_V
+    CMS_GTM_ID: cms-production:GTM_ID
+    CMS_ACADEMY_BASE_URL: cms-production:ACADEMY_BASE_URL
+    CMS_STUDIO_GET_HELP_URL: cms-production:STUDIO_GET_HELP_URL
 
 phases:
   install:
     runtime-versions:
       nodejs: 14
     commands:
-      # Set APT_VERSION
-      - export APT_VERSION=`cat .version`
+      - TAG=v$APT_VERSION
       - IFS="." read -r V_MAJOR V_MINOR V_PATCH <<< $APT_VERSION
+      # set filewatcher limits
+      - sysctl -w fs.inotify.max_user_watches=524288
+      - sysctl -p
       # setup yarn
       - npm i -g yarn
+      - echo Installing dependencies...
+      # put our deployment key in the proper folder
+      - cp $CODEBUILD_SRC_DIR_github_deployment_key_bundle/id_rsa ~/.ssh/id_rsa
+      # export it for use
+      - APT_SSH_KEY=`cat ~/.ssh/id_rsa`
+      - export APT_SSH_KEY
+      # Log in to AWS registry
+      - aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 006592501465.dkr.ecr.eu-north-1.amazonaws.com
       # install the CMS dependencies
+      - cd $CODEBUILD_SRC_DIR_cms_production
       - rm -f ./.env.staging
       - >
         echo "API_BASE_URL='$CMS_API_BASE_URL'"  >> ./.env.staging
@@ -79,32 +89,36 @@ phases:
       - >
         echo "STUDIO_GET_HELP_URL='$CMS_STUDIO_GET_HELP_URL'" >> ./.env.staging
       - yarn install
+  pre_build:
+      
   build:
     commands:
+      - echo Building...
       # build the CMS
+      - cd $CODEBUILD_SRC_DIR_cms_production
       - yarn run build:staging
   post_build:
     commands:
       # deploy CMS
       - echo CMS >> Updating environment...
-      - cd ./build
-      - aws s3 sync . s3://aptr-app-cms-dev --delete # System CMS
-      - aws s3 sync . s3://aptr-app-cms-apps-dev # Apps CMS all files
+      - cd $CODEBUILD_SRC_DIR_cms_production/build
+      - aws s3 sync . s3://aptr-app-cms-production --delete # System CMS
+      - aws s3 sync . s3://aptr-app-cms-apps-production # Apps CMS all files
       - echo $V_PATCH > VERSION
-      - aws s3 cp VERSION s3://aptr-app-cms-apps-files-dev/$V_MAJOR.$V_MINOR/VERSION
-      - aws s3 sync . s3://aptr-app-cms-apps-files-dev/$V_MAJOR.$V_MINOR/$V_PATCH/ --delete # Apps CMS versioned files
-      - aws cloudfront create-invalidation --distribution-id E1AM81QEWWQE5F --paths '/*'
+      - aws s3 cp VERSION s3://aptr-app-cms-apps-files-production/$V_MAJOR.$V_MINOR/VERSION
+      - aws s3 sync . s3://aptr-app-cms-apps-files-production/$V_MAJOR.$V_MINOR/$V_PATCH/ --delete # Apps CMS versioned files
+      - aws cloudfront create-invalidation --distribution-id E2F2RE903X9SGM --paths '/*'
 artifacts:
   files:
     - 'build/*'
-  base-directory: $CODEBUILD_SRC_DIR_cms_staging
+  base-directory: $CODEBUILD_SRC_DIR_cms_production
   discard-paths: yes
   secondary-artifacts:
-    cms_staging:
-      base-directory: $CODEBUILD_SRC_DIR_cms_staging
+    cms_production:
+      base-directory: $CODEBUILD_SRC_DIR_cms_production
       files:
-        - cms-staging
-      name: cms-staging
+        - cms-production
+      name: cms-production
     github_deployment_key_bundle:
       base-directory: $CODEBUILD_SRC_DIR_github_deployment_key_bundle
       files:
