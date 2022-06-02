@@ -1,78 +1,90 @@
 version: 0.2
 
 env:
+  shell: bash
   variables:
     # For Docker
     DOCKER_BUILDKIT: 1
     COMPOSE_DOCKER_CLI_BUILD: 1
   secrets-manager:
     # API secrets
-    APT_API_CONFIG: api-staging
+    APT_API_CONFIG: api-production
 
 phases:
   install:
+    runtime-versions:
+      nodejs: 14
     commands:
+      - TAG=v$APT_VERSION
+      - IFS="." read -r V_MAJOR V_MINOR V_PATCH <<< $APT_VERSION
+      # set filewatcher limits
+      - sysctl -w fs.inotify.max_user_watches=524288
+      - sysctl -p
+      # setup yarn
+      - npm i -g yarn
+      - echo Installing dependencies...
+      # put our deployment key in the proper folder
+      - cp $CODEBUILD_SRC_DIR_github_deployment_key_bundle/id_rsa ~/.ssh/id_rsa
+      # export it for use
+      - APT_SSH_KEY=`cat ~/.ssh/id_rsa`
+      - export APT_SSH_KEY
       # Log in to AWS registry
       - aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 006592501465.dkr.ecr.eu-north-1.amazonaws.com
+      - yarn install
   pre_build:
     commands:
-      # Set APT_VERSION
-      - APT_VERSION=`cat .version`
       # API
       - aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 006592501465.dkr.ecr.eu-north-1.amazonaws.com
-      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api:dev || true
-      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-apps:dev || true
-      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-push:dev || true
-      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-analytics:dev || true
-      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-build:dev || true
-      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-pwa:dev || true
-      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-cms-apps:dev || true
-      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-webhook:dev || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api:production || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-apps:production || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-push:production || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-analytics:production || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-build:production || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-pwa:production || true
+      - docker pull 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-cms-apps:production || true
   build:
     commands:
       - echo Building...
       # build the API
-      - docker-compose build --parallel api apps push analytics build pwa cms-apps webhook
-      - docker tag api_api:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api:dev
-      - docker tag api_apps:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-apps:dev
-      - docker tag api_push:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-push:dev
-      - docker tag api_analytics:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-analytics:dev
-      - docker tag api_build:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-build:dev
-      - docker tag api_pwa:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-pwa:dev
-      - docker tag api_cms_apps:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-cms-apps:dev
-      - docker tag api_webhook:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-webhook:dev
+      - cd $CODEBUILD_SRC_DIR_api_production
+      - docker-compose build --parallel api apps push analytics build pwa cms-apps
+      - docker tag api_api:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api:production
+      - docker tag api_apps:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-apps:production
+      - docker tag api_push:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-push:production
+      - docker tag api_analytics:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-analytics:production
+      - docker tag api_build:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-build:production
+      - docker tag api_pwa:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-pwa:production
+      - docker tag api_cms_apps:latest 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-cms-apps:production
   post_build:
     commands:
       # deploy API
       - echo API >> Updating environment...
-      - cd $CODEBUILD_SRC_DIR_api_dev
-      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api:dev
-      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-apps:dev
-      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-push:dev
-      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-analytics:dev
-      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-build:dev
-      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-pwa:dev
-      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-cms-apps:dev
-      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-webhook:dev
-      - aws ecs update-service --cluster api-dev --service api --force-new-deployment
-      - aws ecs update-service --cluster api-dev --service apps --force-new-deployment
-      - aws ecs update-service --cluster api-dev --service push --force-new-deployment
-      - aws ecs update-service --cluster api-dev --service analytics --force-new-deployment
-      - aws ecs update-service --cluster api-dev --service build --force-new-deployment
-      - aws ecs update-service --cluster api-dev --service pwa --force-new-deployment
-      - aws ecs update-service --cluster api-dev --service cms-apps --force-new-deployment
-      - aws ecs update-service --cluster api-dev --service webhook --force-new-deployment
+      - cd $CODEBUILD_SRC_DIR_api_production
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api:production
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-apps:production
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-push:production
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-analytics:production
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-build:production
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-pwa:production
+      - docker push 006592501465.dkr.ecr.eu-north-1.amazonaws.com/api-cms-apps:production
+      - aws ecs update-service --cluster api-production --service api --force-new-deployment
+      - aws ecs update-service --cluster api-production --service apps --force-new-deployment
+      - aws ecs update-service --cluster api-production --service push --force-new-deployment
+      - aws ecs update-service --cluster api-production --service analytics --force-new-deployment
+      - aws ecs update-service --cluster api-production --service build --force-new-deployment
+      - aws ecs update-service --cluster api-production --service pwa --force-new-deployment
+      - aws ecs update-service --cluster api-production --service cms-apps --force-new-deployment
 artifacts:
   files:
     - 'build/*'
-  base-directory: $CODEBUILD_SRC_DIR_cms_staging
+  base-directory: $CODEBUILD_SRC_DIR_cms_production
   discard-paths: yes
   secondary-artifacts:
-    api_staging:
-      base-directory: $CODEBUILD_SRC_DIR_api_staging
+    api_production:
+      base-directory: $CODEBUILD_SRC_DIR_api_production
       files:
-        - api-staging
-      name: api-staging
+        - api-production
+      name: api-production
     github_deployment_key_bundle:
       base-directory: $CODEBUILD_SRC_DIR_github_deployment_key_bundle
       files:
