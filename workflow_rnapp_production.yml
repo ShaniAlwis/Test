@@ -1,6 +1,6 @@
 # This is a basic workflow to help you get started with Actions
 
-name: Library Auto-Bump
+name: Release based-prod
 
 # Controls when the workflow will run
 on:
@@ -9,7 +9,7 @@ on:
   release:
     types: [published]
     tags: 
-      - v[0-9]+.*'
+      - v.*-prod
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -18,7 +18,7 @@ on:
 jobs:
   check-merge:
     # The type of runner that the job will run on
-    if:  ${{ startsWith(github.event.release.tag_name, 'v[0-9]+.*'-staging') }}
+    if:  ${{ startsWith(github.event.release.tag_name, v.*-prod) }}
     runs-on: ubuntu-latest
 
     # Steps represent a sequence of tasks that will be executed as part of the job
@@ -63,4 +63,4 @@ jobs:
         uses: aws-actions/aws-codebuild-run-build@v1
         with:
           project-name: rnapp-prod
-          buildspec-override: .aws/buildspecs/buildspec_dev.yml
+          buildspec-override: .aws/buildspecs/buildspec_prod.yml
