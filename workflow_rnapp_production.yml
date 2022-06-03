@@ -2,8 +2,8 @@
 
 name: Release based-prod
 
-  on:
-   release:
+on:
+  release:
     types: [published]
     tags: 
       - v*-prod
