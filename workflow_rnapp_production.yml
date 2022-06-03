@@ -3,7 +3,7 @@
 name: Release based-prod
 
   on:
-  release:
+   release:
     types: [published]
     tags: 
       - v*-prod
