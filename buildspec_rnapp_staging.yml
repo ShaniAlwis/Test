@@ -9,18 +9,29 @@ env:
   secrets-manager:
     # RNAPP secrets
     RNAPP_CONFIG: rnapp-staging
+    APT_VERSION: rnapp-staging:VERSION
+    APT_APP_VERSION: rnapp-staging:VERSION
 
 phases:
   install:
     runtime-versions:
       nodejs: 14
     commands:
-      # Set APT_VERSION
-      - export APT_VERSION=`cat VERSION`
+      - TAG=v$APT_VERSION-staging
       - IFS="." read -r V_MAJOR V_MINOR V_PATCH <<< $APT_VERSION
-      # start
+      # set filewatcher limits
+      - sysctl -w fs.inotify.max_user_watches=524288
+      - sysctl -p
+      # setup yarn
+      - npm i -g yarn
       - echo Installing dependencies...
+      # put our deployment key in the proper folder
+      - cp $CODEBUILD_SRC_DIR_github_deployment_key_bundle/id_rsa ~/.ssh/id_rsa
+      # export it for use
+      - APT_SSH_KEY=`cat ~/.ssh/id_rsa`
+      - export APT_SSH_KEY
       # install the RNAPP dependencies
+      - cd $CODEBUILD_SRC_DIR_app3_staging
       - rm -f ./src/config/env.js
       - echo "module.exports = {" >> ./src/config/env.js
       - >
@@ -29,11 +40,15 @@ phases:
       - yarn install
       # install rn cli for building bundles
       - npm i -g react-native-cli
+  pre_build:
+    
   build:
     commands:
+      - echo Building...
       # build the RNAPP
+      - cd $CODEBUILD_SRC_DIR_app3_staging
       - yarn run web:production
-      # build the rn-app BUNDLES
+      - # build the rn-app BUNDLES
       - npm i
       - mkdir ~/bundle-output
       - react-native bundle --entry-file ./index.ios.js --dev false --platform ios --bundle-output ~/bundle-output/main.ios.jsbundle
@@ -42,37 +57,38 @@ phases:
     commands:
       # deploy RNAPP
       - echo RNAPP >> Updating environment...
-      - cd ./dist/web
+      - cd $CODEBUILD_SRC_DIR_app3_staging/dist/web
       - echo $V_PATCH > VERSION
-      - aws s3 sync . s3://aptr-app-rnapp-dev
-      - aws s3 cp VERSION s3://aptr-app-pwa-dev/$V_MAJOR.$V_MINOR/VERSION
-      - aws s3 sync . s3://aptr-app-pwa-dev/$V_MAJOR.$V_MINOR/$V_PATCH/ --delete
-      - aws cloudfront create-invalidation --distribution-id E2R4J05WO367SS --paths '/*'
+      - aws s3 sync . s3://aptr-app-rnapp-staging
+      - aws s3 cp VERSION s3://aptr-app-pwa-staging/$V_MAJOR.$V_MINOR/VERSION
+      - aws s3 sync . s3://aptr-app-pwa-staging/$V_MAJOR.$V_MINOR/$V_PATCH/ --delete
+      - aws cloudfront create-invalidation --distribution-id E3EML7E2O24EY7 --paths '/*'
       # deploy app bundles & VERSION file
       - cd ~/bundle-output
-      - aws s3 sync . s3://aptr-app-rnapp-native-dev/$V_MAJOR.$V_MINOR/$V_PATCH --delete
+      - aws s3 sync . s3://aptr-app-rnapp-native-staging/$V_MAJOR.$V_MINOR/$V_PATCH --delete
       - cd ~
       - echo $V_PATCH > VERSION
-      - aws s3 cp VERSION s3://aptr-app-rnapp-native-dev/$V_MAJOR.$V_MINOR/VERSION
-      - aws cloudfront create-invalidation --distribution-id E73HVTBYMQZAD --paths "/$V_MAJOR.$V_MINOR/*"
+      - aws s3 cp VERSION s3://aptr-app-rnapp-native-staging/$V_MAJOR.$V_MINOR/VERSION
+      - aws cloudfront create-invalidation --distribution-id E3O07BY7WQ0S9T --paths "/$V_MAJOR.$V_MINOR/*"
 artifacts:
   files:
     - 'build/*'
   base-directory: $CODEBUILD_SRC_DIR_cms_staging
   discard-paths: yes
   secondary-artifacts:
-    cms_staging:
-      base-directory: $CODEBUILD_SRC_DIR_cms_staging
-      files:
-        - cms-staging
-      name: cms-staging
     rnapp_staging:
       base-directory: $CODEBUILD_SRC_DIR_rnapp_staging
       files:
         - rnapp-staging
-      name: rnapp-staging 
+      name: rnapp-staging
+    app3_staging:
+      base-directory: $CODEBUILD_SRC_DIR_app3_staging
+      files:
+        - app3-staging
+      name: app3-staging
     github_deployment_key_bundle:
       base-directory: $CODEBUILD_SRC_DIR_github_deployment_key_bundle
       files:
         - github-deployment-key-bundle
       name: github-deployment-key-bundle
+
