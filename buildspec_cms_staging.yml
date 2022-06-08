@@ -26,19 +26,27 @@ env:
     CMS_GTM_ID: cms-staging:GTM_ID
     CMS_ACADEMY_BASE_URL: cms-staging:ACADEMY_BASE_URL
     CMS_STUDIO_GET_HELP_URL: cms-staging:STUDIO_GET_HELP_URL
-    
 
 phases:
   install:
     runtime-versions:
       nodejs: 14
     commands:
-      # Set APT_VERSION
-      - export APT_VERSION=`cat .version`
+      - TAG=v$APT_VERSION-staging
       - IFS="." read -r V_MAJOR V_MINOR V_PATCH <<< $APT_VERSION
+      # set filewatcher limits
+      - sysctl -w fs.inotify.max_user_watches=524288
+      - sysctl -p
       # setup yarn
       - npm i -g yarn
+      - echo Installing dependencies...
+      # put our deployment key in the proper folder
+      - cp $CODEBUILD_SRC_DIR_github_deployment_key_bundle/id_rsa ~/.ssh/id_rsa
+      # export it for use
+      - APT_SSH_KEY=`cat ~/.ssh/id_rsa`
+      - export APT_SSH_KEY
       # install the CMS dependencies
+      - cd $CODEBUILD_SRC_DIR_cms_staging
       - rm -f ./.env.staging
       - >
         echo "API_BASE_URL='$CMS_API_BASE_URL'"  >> ./.env.staging
@@ -79,21 +87,26 @@ phases:
       - >
         echo "STUDIO_GET_HELP_URL='$CMS_STUDIO_GET_HELP_URL'" >> ./.env.staging
       - yarn install
+      
   build:
     commands:
+      - echo Building...
       # build the CMS
+      - cd $CODEBUILD_SRC_DIR_cms_staging
       - yarn run build:staging
+     
   post_build:
     commands:
       # deploy CMS
       - echo CMS >> Updating environment...
-      - cd ./build
-      - aws s3 sync . s3://aptr-app-cms-dev --delete # System CMS
-      - aws s3 sync . s3://aptr-app-cms-apps-dev # Apps CMS all files
+      - cd $CODEBUILD_SRC_DIR_cms_staging/build
+      - aws s3 sync . s3://aptr-app-cms-staging --delete # System CMS
+      - aws s3 sync . s3://aptr-app-cms-apps-staging # Apps CMS all files
       - echo $V_PATCH > VERSION
-      - aws s3 cp VERSION s3://aptr-app-cms-apps-files-dev/$V_MAJOR.$V_MINOR/VERSION
-      - aws s3 sync . s3://aptr-app-cms-apps-files-dev/$V_MAJOR.$V_MINOR/$V_PATCH/ --delete # Apps CMS versioned files
-      - aws cloudfront create-invalidation --distribution-id E1AM81QEWWQE5F --paths '/*'
+      - aws s3 cp VERSION s3://aptr-app-cms-apps-files-staging/$V_MAJOR.$V_MINOR/VERSION
+      - aws s3 sync . s3://aptr-app-cms-apps-files-staging/$V_MAJOR.$V_MINOR/$V_PATCH/ --delete # Apps CMS versioned files
+      - aws cloudfront create-invalidation --distribution-id E1B437PC6791I9 --paths '/*'
+      
 artifacts:
   files:
     - 'build/*'
@@ -105,6 +118,10 @@ artifacts:
       files:
         - cms-staging
       name: cms-staging
+      base-directory: $CODEBUILD_SRC_DIR_api_staging
+      files:
+        - api-staging
+      name: api-staging
     github_deployment_key_bundle:
       base-directory: $CODEBUILD_SRC_DIR_github_deployment_key_bundle
       files:
